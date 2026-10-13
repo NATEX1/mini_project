@@ -62,8 +62,8 @@ $dept_id = isset($_GET['dept_id']) ? (int)$_GET['dept_id'] : 0;
     <!-- กล่องซ้าย: กำลังเรียก / กำลังรับบริการ -->
     <div class="tv-panel">
         <div class="tv-panel-title">
-            <span style="color: #38bdf8;"><i class="fa-solid fa-bullhorn"></i> กำลังเรียก / กำลังรับบริการ</span>
-            <span style="font-size: 0.9rem; color: #94a3b8;">NOW SERVING</span>
+            <span style="color: #38bdf8;"><i class="fa-solid fa-bullhorn"></i> หมายเลขที่กำลังตรวจ / รับบริการ</span>
+            <span style="font-size: 0.9rem; color: #94a3b8;">ห้องตรวจ</span>
         </div>
 
         <div id="calling-container">
@@ -77,8 +77,8 @@ $dept_id = isset($_GET['dept_id']) ? (int)$_GET['dept_id'] : 0;
     <!-- กล่องขวา: รอรับบริการ -->
     <div class="tv-panel">
         <div class="tv-panel-title">
-            <span style="color: #f59e0b;"><i class="fa-solid fa-clock"></i> รอรับบริการ</span>
-            <span style="font-size: 0.9rem; color: #94a3b8;">WAITING LIST</span>
+            <span style="color: #f59e0b;"><i class="fa-solid fa-clock"></i> ลำดับคิวรอตรวจ</span>
+            <span style="font-size: 0.9rem; color: #94a3b8;">จุดพักรอ</span>
         </div>
 
         <div id="waiting-container">
