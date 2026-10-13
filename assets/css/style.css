@@ -470,6 +470,137 @@ a:hover {
   gap: 8px;
 }
 
+/* ========================================================
+   Clinical Triage Strip (Clean Workload Bar - No AI Slop)
+   ======================================================== */
+.triage-strip {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow-sm);
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.triage-cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 130px;
+}
+
+.triage-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.triage-value {
+  font-size: 1.85rem;
+  font-weight: 800;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0;
+  color: #0f172a;
+}
+
+.triage-sub {
+  font-size: 0.76rem;
+  color: #94a3b8;
+}
+
+.triage-divider {
+  width: 1px;
+  height: 44px;
+  background-color: var(--border);
+}
+
+.text-amber   { color: #d97706 !important; }
+.text-cyan    { color: #0284c7 !important; }
+.text-emerald { color: #059669 !important; }
+.text-slate   { color: #334155 !important; }
+
+/* Workstation Grid (70% Operations / 30% Department Load) */
+.workstation-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 24px;
+  margin-bottom: 24px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .workstation-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Queue Chip */
+.queue-chip {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--primary-dark);
+  background: var(--primary-light);
+  border: 1px solid #bae6fd;
+}
+.queue-chip.called {
+  background: #ede9fe;
+  color: #6d28d9;
+  border-color: #ddd6fe;
+}
+.queue-chip.serving {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #7dd3fc;
+}
+
+/* Department Status Card in Workstation */
+.dept-status-card {
+  display: block;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: #ffffff;
+  transition: all 0.2s ease;
+  text-decoration: none;
+}
+.dept-status-card:hover {
+  border-color: #0284c7;
+  background: #f8fafc;
+  transform: translateX(2px);
+}
+.dept-status-card.selected {
+  border-color: #0284c7;
+  background: #f0f9ff;
+  box-shadow: 0 0 0 2px #bae6fd;
+}
+.dept-total-pill {
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #334155;
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+.dept-mini-badge {
+  font-size: 0.74rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.dept-mini-badge.amber { background: #fef3c7; color: #b45309; }
+.dept-mini-badge.cyan  { background: #e0f2fe; color: #0369a1; }
+.dept-mini-badge.green { background: #dcfce7; color: #15803d; }
+
 /* Stats Grid */
 .stats-grid {
   display: grid;
