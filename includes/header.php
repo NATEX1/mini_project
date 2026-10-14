@@ -75,9 +75,24 @@ $user = current_user();
                     </a>
                 </li>
                 <li>
+                    <a href="pharmacy.php" class="<?= in_array($current_page, ['pharmacy.php', 'print_pharmacy.php']) ? 'active' : '' ?>">
+                        <i class="fa-solid fa-pills nav-icon"></i>
+                        <span>คิวรับยา / ห้องจ่ายยา</span>
+                    </a>
+                </li>
+                <li>
                     <a href="queue_display.php" target="_blank" class="nav-external">
                         <i class="fa-solid fa-tv nav-icon"></i>
-                        <span>หน้าจอคิวผู้ป่วย (TV)</span>
+                        <span>จอคิวตรวจแพทย์ (TV)</span>
+                        <span class="nav-screen-tag">PIDS</span>
+                        <i class="fa-solid fa-arrow-up-right-from-square nav-ext-icon"></i>
+                    </a>
+                </li>
+                <li>
+                    <a href="pharmacy_display.php" target="_blank" class="nav-external nav-rx-screen">
+                        <i class="fa-solid fa-pills nav-icon"></i>
+                        <span>จอคิวรับยา (TV)</span>
+                        <span class="nav-screen-tag nav-screen-tag-rx">PIDS</span>
                         <i class="fa-solid fa-arrow-up-right-from-square nav-ext-icon"></i>
                     </a>
                 </li>
@@ -86,16 +101,16 @@ $user = current_user();
             <div class="sidebar-label">การจัดการระบบ</div>
             <ul class="sidebar-menu">
                 <li>
-                    <a href="departments.php" class="<?= $current_page == 'departments.php' ? 'active' : '' ?>">
+                    <a href="departments.php" class="<?= in_array($current_page, ['departments.php', 'rooms.php']) ? 'active' : '' ?>">
                         <i class="fa-solid fa-stethoscope nav-icon"></i>
-                        <span>แผนกตรวจ / คลินิก</span>
+                        <span>แผนกและห้องตรวจ</span>
                     </a>
                 </li>
                 <?php if ($user['role'] === 'ผู้ดูแลระบบ'): ?>
                 <li>
                     <a href="staff.php" class="<?= $current_page == 'staff.php' ? 'active' : '' ?>">
-                        <i class="fa-solid fa-user-shield nav-icon"></i>
-                        <span>จัดการเจ้าหน้าที่</span>
+                        <i class="fa-solid fa-user-doctor nav-icon"></i>
+                        <span>จัดการแพทย์และเจ้าหน้าที่</span>
                     </a>
                 </li>
                 <?php endif; ?>
@@ -105,8 +120,12 @@ $user = current_user();
         <!-- กล่องข้อมูลผู้ใช้ด้านล่างสุดของ Sidebar -->
         <div class="sidebar-footer">
             <div class="sidebar-user">
-                <div class="user-avatar">
-                    <i class="fa-regular fa-circle-user"></i>
+                <div class="user-avatar <?= $user['role'] === 'แพทย์' ? 'avatar-doctor' : '' ?>">
+                    <?php if ($user['role'] === 'แพทย์'): ?>
+                        <i class="fa-solid fa-user-doctor"></i>
+                    <?php else: ?>
+                        <i class="fa-regular fa-circle-user"></i>
+                    <?php endif; ?>
                 </div>
                 <div class="user-info">
                     <div class="user-name"><?= htmlspecialchars($user['name'] ?: $user['username']) ?></div>
@@ -151,7 +170,7 @@ $user = current_user();
             if ($flash): 
             ?>
                 <div class="alert alert-<?= htmlspecialchars($flash['type']) ?>">
-                    <div>
+                    <div class="alert-body">
                         <?php if ($flash['type'] === 'success'): ?>
                             <i class="fa-solid fa-circle-check"></i>
                         <?php elseif ($flash['type'] === 'danger'): ?>
@@ -161,7 +180,12 @@ $user = current_user();
                         <?php else: ?>
                             <i class="fa-solid fa-circle-info"></i>
                         <?php endif; ?>
-                        <span style="margin-left: 8px;"><?= htmlspecialchars($flash['message']) ?></span>
+                        <span class="alert-text"><?= htmlspecialchars($flash['message']) ?></span>
+                        <?php if (!empty($flash['action'])): ?>
+                            <a href="<?= htmlspecialchars($flash['action']['url']) ?>"<?= $flash['action']['blank'] ? ' target="_blank" rel="noopener"' : '' ?> class="btn btn-primary btn-sm alert-action">
+                                <i class="fa-solid fa-print"></i> <?= htmlspecialchars($flash['action']['label']) ?>
+                            </a>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endif; ?>

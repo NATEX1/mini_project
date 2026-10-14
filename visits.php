@@ -18,6 +18,26 @@ if ($patient_id > 0) {
 // รายชื่อแผนก
 $departments = $pdo->query("SELECT * FROM departments WHERE is_active = 1 ORDER BY department_name ASC")->fetchAll();
 
+// รายชื่อห้องตรวจทั้งหมด
+$rooms = $pdo->query("
+    SELECT r.*, d.department_name, d.department_code, s.first_name as doc_fname, s.last_name as doc_lname 
+    FROM rooms r 
+    JOIN departments d ON r.department_id = d.id 
+    LEFT JOIN staff s ON r.doctor_id = s.id 
+    WHERE r.is_active = 1 
+    ORDER BY r.room_number ASC
+")->fetchAll();
+
+$rooms_by_dept = [];
+foreach ($rooms as $r) {
+    $rooms_by_dept[$r['department_id']][] = [
+        'id' => $r['id'],
+        'room_number' => $r['room_number'],
+        'room_name' => $r['room_name'],
+        'doctor' => $r['doc_fname'] ? ($r['doc_fname'] . ' ' . $r['doc_lname']) : ''
+    ];
+}
+
 // รายชื่อผู้ป่วยสำหรับ Dropdown หรือ Autocomplete
 $all_patients = $pdo->query("SELECT id, hn, national_id, first_name, last_name FROM patients ORDER BY id DESC LIMIT 50")->fetchAll();
 
@@ -26,6 +46,7 @@ $errors = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $patient_id    = (int)($_POST['patient_id'] ?? 0);
     $department_id = (int)($_POST['department_id'] ?? 0);
+    $room_id       = !empty($_POST['room_id']) ? (int)$_POST['room_id'] : null;
 
     if (empty($patient_id)) {
         $errors[] = 'กรุณาเลือกผู้ป่วยที่ต้องการออกคิว';
@@ -38,40 +59,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
 
-            // ตรวจสอบว่าผู้ป่วยมีคิวรอตรวจในแผนกนี้วันนี้อยู่แล้วหรือไม่ (เพื่อแจ้งเตือนหรือป้องกันคิวซ้ำซ้อน)
-            $today = date('Y-m-d');
-            $check_stmt = $pdo->prepare("
-                SELECT q.queue_number, q.status 
-                FROM queues q
-                JOIN visits v ON q.visit_id = v.id
-                WHERE v.patient_id = ? AND q.department_id = ? AND DATE(q.created_at) = ? AND q.status IN ('waiting', 'called', 'serving')
-            ");
-            $check_stmt->execute([$patient_id, $department_id, $today]);
-            $existing = $check_stmt->fetch();
-
-            if ($existing) {
-                // แจ้งเตือนแต่ยังอนุญาตถ้ากดยืนยัน หรือจะสร้างใหม่
-                // ออกคิวต่อได้ตามปกติ
+            // หาห้องแรกอัตโนมัติถ้าไม่ได้เลือกห้อง
+            if (!$room_id && $department_id > 0) {
+                $find_room = $pdo->prepare("SELECT id FROM rooms WHERE department_id = ? AND is_active = 1 ORDER BY id ASC LIMIT 1");
+                $find_room->execute([$department_id]);
+                $room_id = $find_room->fetchColumn() ?: null;
             }
 
             // 1. สร้าง Visit
             $staff_id = $_SESSION['staff_id'];
             $visit_stmt = $pdo->prepare("
-                INSERT INTO visits (patient_id, department_id, staff_id, visit_date, status)
-                VALUES (?, ?, ?, NOW(), 'registered')
+                INSERT INTO visits (patient_id, department_id, room_id, staff_id, visit_date, status)
+                VALUES (?, ?, ?, ?, NOW(), 'registered')
             ");
-            $visit_stmt->execute([$patient_id, $department_id, $staff_id]);
+            $visit_stmt->execute([$patient_id, $department_id, $room_id, $staff_id]);
             $visit_id = $pdo->lastInsertId();
 
             // 2. สร้าง Queue
             $queue_info = generate_queue_number($pdo, $department_id);
             $queue_stmt = $pdo->prepare("
-                INSERT INTO queues (visit_id, department_id, queue_number, queue_sequence, status)
-                VALUES (?, ?, ?, ?, 'waiting')
+                INSERT INTO queues (visit_id, department_id, room_id, queue_number, queue_sequence, status)
+                VALUES (?, ?, ?, ?, ?, 'waiting')
             ");
             $queue_stmt->execute([
                 $visit_id,
                 $department_id,
+                $room_id,
                 $queue_info['queue_number'],
                 $queue_info['queue_sequence']
             ]);
@@ -117,7 +130,7 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 <?php endif; ?>
 
-<div class="card" style="max-width: 800px; margin: 0 auto;">
+<div class="card card-narrow">
     <form method="POST" action="visits.php">
         
         <!-- เลือกผู้ป่วย -->
@@ -127,20 +140,20 @@ require_once __DIR__ . '/includes/header.php';
             </label>
             
             <?php if ($selected_patient): ?>
-                <div style="background: var(--primary-light); border: 1px solid #bae6fd; border-radius: var(--radius-md); padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
+                <div class="selected-patient">
                     <div>
                         <input type="hidden" name="patient_id" value="<?= $selected_patient['id'] ?>">
-                        <div style="font-weight: 700; font-size: 1.05rem; color: var(--primary-dark);">
+                        <div class="selected-patient-name">
                             <?= htmlspecialchars($selected_patient['first_name'] . ' ' . $selected_patient['last_name']) ?>
                         </div>
-                        <div style="font-size: 0.88rem; color: #0369a1; margin-top: 2px;">
+                        <div class="selected-patient-meta">
                             HN: <strong><?= htmlspecialchars($selected_patient['hn']) ?></strong> | บัตร ปชช.: <?= htmlspecialchars($selected_patient['national_id']) ?> | โทร: <?= htmlspecialchars($selected_patient['phone_number'] ?: '-') ?>
                         </div>
                     </div>
-                    <a href="visits.php" class="btn btn-outline btn-sm" style="background:#fff;">เปลี่ยนคน</a>
+                    <a href="visits.php" class="btn btn-outline btn-sm">เปลี่ยนคน</a>
                 </div>
             <?php else: ?>
-                <select id="patient_id" name="patient_id" required style="font-size: 1rem; padding: 12px;">
+                <select id="patient_id" name="patient_id" required class="select-lg">
                     <option value="">-- ค้นหาหรือเลือกผู้ป่วย --</option>
                     <?php foreach ($all_patients as $p): ?>
                         <option value="<?= $p['id'] ?>" <?= ($patient_id === (int)$p['id']) ? 'selected' : '' ?>>
@@ -148,8 +161,8 @@ require_once __DIR__ . '/includes/header.php';
                         </option>
                     <?php endforeach; ?>
                 </select>
-                <div style="margin-top: 8px; display: flex; justify-content: space-between; align-items: center;">
-                    <small style="color: var(--text-muted);">ไม่พบผู้ป่วยในตัวเลือก?</small>
+                <div class="form-foot">
+                    <small class="muted-sm">ไม่พบผู้ป่วยในตัวเลือก?</small>
                     <a href="patient_add.php" class="btn btn-outline btn-sm">
                         <i class="fa-solid fa-user-plus"></i> ลงทะเบียนผู้ป่วยใหม่
                     </a>
@@ -157,35 +170,62 @@ require_once __DIR__ . '/includes/header.php';
             <?php endif; ?>
         </div>
 
-        <!-- เลือกแผนกตรวจ -->
-        <div class="form-group" style="margin-top: 24px;">
-            <label for="department_id">
-                <i class="fa-solid fa-stethoscope"></i> เลือกแผนกตรวจ / คลินิก <span class="required">*</span>
-            </label>
-            <select id="department_id" name="department_id" required style="font-size: 1.05rem; padding: 12px; font-weight: 500;">
-                <option value="">-- กรุณาเลือกแผนกที่ต้องการส่งตรวจ --</option>
-                <?php foreach ($departments as $d): ?>
-                    <option value="<?= $d['id'] ?>">
-                        [<?= htmlspecialchars($d['department_code']) ?>] <?= htmlspecialchars($d['department_name']) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-        </div>
+        <!-- เลือกแผนกตรวจ และห้องตรวจ -->
+        <div class="grid-2 visit-grid">
+            <div class="form-group form-group-flush">
+                <label for="department_id">
+                    <i class="fa-solid fa-stethoscope"></i> เลือกแผนกตรวจ / คลินิก <span class="required">*</span>
+                </label>
+                <select id="department_id" name="department_id" required class="select-lg" onchange="updateRoomOptions(this.value)">
+                    <option value="">-- กรุณาเลือกแผนก --</option>
+                    <?php foreach ($departments as $d): ?>
+                        <option value="<?= $d['id'] ?>">
+                            [<?= htmlspecialchars($d['department_code']) ?>] <?= htmlspecialchars($d['department_name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
 
-        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; margin: 24px 0;">
-            <div style="display: flex; align-items: center; gap: 10px; color: #475569; font-size: 0.9rem;">
-                <i class="fa-solid fa-circle-info" style="color: var(--primary); font-size: 1.2rem;"></i>
-                <span>เมื่อกด <strong>"ออกบัตรคิว"</strong> ระบบจะรันหมายเลขคิวประจำวันและนำท่านไปยังหน้าพิมพ์บัตรคิวความร้อนทันที</span>
+            <div class="form-group form-group-flush">
+                <label for="room_id">
+                    <i class="fa-solid fa-door-open"></i> ห้องตรวจที่ระบุในบัตรคิว
+                </label>
+                <select id="room_id" name="room_id" class="select-lg">
+                    <option value="">-- เลือกห้องตรวจ (หรือจัดห้องแรกอัตโนมัติ) --</option>
+                </select>
             </div>
         </div>
 
-        <div style="display: flex; justify-content: flex-end; gap: 12px;">
+        <div class="info-note">
+            <i class="fa-solid fa-circle-info"></i>
+            <span>เมื่อกด <strong>"ออกบัตรคิว"</strong> ระบบจะรันหมายเลขคิว ระบุห้องตรวจที่คนไข้ต้องไป และพิมพ์บัตรคิวความร้อนทันที</span>
+        </div>
+
+        <div class="form-actions-end">
             <a href="index.php" class="btn btn-outline">ยกเลิก</a>
             <button type="submit" class="btn btn-primary btn-lg">
-                <i class="fa-solid fa-print"></i> ออกบัตรคิวและพิมพ์ (Print Ticket)
+                <i class="fa-solid fa-print"></i> ออกบัตรคิวและพิมพ์
             </button>
         </div>
     </form>
 </div>
+
+<script>
+    const roomsByDept = <?= json_encode($rooms_by_dept) ?>;
+    const roomSelect = document.getElementById('room_id');
+
+    function updateRoomOptions(deptId) {
+        roomSelect.innerHTML = '<option value="">-- เลือกห้องตรวจ (หรือจัดห้องแรกอัตโนมัติ) --</option>';
+        if (!deptId || !roomsByDept[deptId]) return;
+
+        roomsByDept[deptId].forEach((r, idx) => {
+            const opt = document.createElement('option');
+            opt.value = r.id;
+            opt.textContent = `${r.room_name} (ห้อง ${r.room_number})${r.doctor ? ' - ' + r.doctor : ''}`;
+            if (idx === 0) opt.selected = true;
+            roomSelect.appendChild(opt);
+        });
+    }
+</script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

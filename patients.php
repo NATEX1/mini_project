@@ -45,12 +45,12 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <div class="card">
-    <form method="GET" action="patients.php" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;">
-        <div style="flex: 1; min-width: 250px;">
+    <form method="GET" action="patients.php" class="filter-form filter-form-tight">
+        <div class="filter-field">
             <label for="search">ค้นหาด้วย HN, เลขบัตร ปชช., ชื่อ-นามสกุล, หรือเบอร์โทร</label>
             <input type="search" id="search" name="search" value="<?= htmlspecialchars($search) ?>" placeholder="พิมพ์คำค้นหา...">
         </div>
-        <div style="width: 160px;">
+        <div class="filter-field slim">
             <label for="gender">เพศ</label>
             <select id="gender" name="gender">
                 <option value="">ทั้งหมด</option>
@@ -59,7 +59,7 @@ require_once __DIR__ . '/includes/header.php';
                 <option value="อื่นๆ" <?= $gender_filter === 'อื่นๆ' ? 'selected' : '' ?>>อื่นๆ</option>
             </select>
         </div>
-        <div style="display: flex; gap: 8px;">
+        <div class="filter-actions">
             <button type="submit" class="btn btn-primary">
                 <i class="fa-solid fa-magnifying-glass"></i> ค้นหา
             </button>
@@ -75,8 +75,8 @@ require_once __DIR__ . '/includes/header.php';
 <div class="card">
     <div class="card-header">
         <h2 class="card-title">
-            <i class="fa-solid fa-users"></i> รายชื่อผู้ป่วย 
-            <span style="font-size: 0.9rem; font-weight: normal; color: var(--text-muted);">(พบ <?= count($patients) ?> รายการ)</span>
+            <i class="fa-solid fa-users"></i> รายชื่อผู้ป่วย
+            <span class="card-title-count">(พบ <?= count($patients) ?> รายการ)</span>
         </h2>
     </div>
 
@@ -97,8 +97,7 @@ require_once __DIR__ . '/includes/header.php';
             <tbody>
                 <?php if (empty($patients)): ?>
                     <tr>
-                        <td colspan="8" style="text-align: center; padding: 30px; color: var(--text-muted);">
-                            <i class="fa-solid fa-folder-open" style="font-size: 2rem; margin-bottom: 10px; display: block; opacity: 0.5;"></i>
+                        <td colspan="8" class="table-empty">
                             ไม่พบข้อมูลผู้ป่วยตามเงื่อนไขที่ค้นหา
                         </td>
                     </tr>
@@ -113,21 +112,21 @@ require_once __DIR__ . '/includes/header.php';
                         }
                         ?>
                         <tr>
-                            <td><strong style="color: var(--primary);"><?= htmlspecialchars($p['hn']) ?></strong></td>
+                            <td><strong class="hn-strong"><?= htmlspecialchars($p['hn']) ?></strong></td>
                             <td><code><?= htmlspecialchars($p['national_id']) ?></code></td>
                             <td>
-                                <a href="patient_detail.php?id=<?= $p['id'] ?>" style="font-weight: 600;">
+                                <a href="patient_detail.php?id=<?= $p['id'] ?>" class="patient-link">
                                     <?= htmlspecialchars($p['first_name'] . ' ' . $p['last_name']) ?>
                                 </a>
                             </td>
                             <td><?= htmlspecialchars($p['gender'] ?: '-') ?></td>
                             <td>
                                 <?= $p['date_of_birth'] ? thai_datetime($p['date_of_birth'], false) : '-' ?>
-                                <small style="color: var(--text-muted); display: block;">(<?= $age ?>)</small>
+                                <small class="muted-block">(<?= $age ?>)</small>
                             </td>
                             <td><?= htmlspecialchars($p['phone_number'] ?: '-') ?></td>
                             <td><small><?= thai_datetime($p['created_at']) ?></small></td>
-                            <td style="text-align: right; white-space: nowrap;">
+                            <td class="cell-actions">
                                 <a href="visits.php?patient_id=<?= $p['id'] ?>" class="btn btn-success btn-sm" title="ออกคิวตรวจ">
                                     <i class="fa-solid fa-ticket"></i> ออกคิว
                                 </a>

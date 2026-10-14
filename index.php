@@ -25,10 +25,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'], $_POST['que
         } elseif ($action === 'serve') {
             $pdo->prepare("UPDATE queues SET status = 'serving' WHERE id = ?")->execute([$queue_id]);
             set_flash('info', "คิว {$target_queue['queue_number']} กำลังรับบริการในห้องตรวจ");
+        } elseif ($action === 'complete_and_pharmacy') {
+            $pdo->prepare("UPDATE queues SET status = 'completed', completed_at = NOW() WHERE id = ?")->execute([$queue_id]);
+            $pdo->prepare("UPDATE visits SET status = 'prescribed' WHERE id = ?")->execute([$target_queue['visit_id']]);
+            
+            $rx_info = generate_pharmacy_queue_number($pdo);
+            $rx_stmt = $pdo->prepare("INSERT INTO pharmacy_queues (visit_id, queue_id, pharmacy_queue_number, sequence, counter_number, status) VALUES (?, ?, ?, ?, 'ช่องจ่ายยา 1', 'waiting')");
+            $rx_stmt->execute([$target_queue['visit_id'], $queue_id, $rx_info['pharmacy_queue_number'], $rx_info['sequence']]);
+            $rx_id = $pdo->lastInsertId();
+
+            set_flash('success', "คิว {$target_queue['queue_number']} ตรวจเสร็จสิ้น ออกคิวรับยา {$rx_info['pharmacy_queue_number']} แล้ว", [
+                'url' => "print_pharmacy.php?id={$rx_id}",
+                'label' => 'พิมพ์บัตรรับยา',
+                'blank' => true
+            ]);
         } elseif ($action === 'complete') {
             $pdo->prepare("UPDATE queues SET status = 'completed', completed_at = NOW() WHERE id = ?")->execute([$queue_id]);
             $pdo->prepare("UPDATE visits SET status = 'completed' WHERE id = ?")->execute([$target_queue['visit_id']]);
-            set_flash('success', "บันทึกคิว {$target_queue['queue_number']} ตรวจเสร็จสิ้นแล้ว");
+            set_flash('success', "บันทึกคิว {$target_queue['queue_number']} ตรวจเสร็จสิ้นแล้ว (ไม่รับยา)");
         }
         $redirect = 'index.php' . ($filter_dept ? "?dept_id={$filter_dept}" : '');
         header("Location: {$redirect}");
@@ -55,6 +69,10 @@ $stmt_completed = $pdo->prepare("SELECT COUNT(*) FROM queues WHERE status = 'com
 $stmt_completed->execute([$today]);
 $today_completed = (int)$stmt_completed->fetchColumn();
 
+// สถิติคิวรับยาวันนี้
+$today_rx_count = (int)$pdo->query("SELECT COUNT(*) FROM pharmacy_queues WHERE DATE(created_at) = CURDATE()")->fetchColumn();
+$today_rx_waiting = (int)$pdo->query("SELECT COUNT(*) FROM pharmacy_queues WHERE DATE(created_at) = CURDATE() AND status IN ('waiting', 'preparing')")->fetchColumn();
+
 // 2. สรุปภาระงานแยกตามแผนก
 $dept_stats_stmt = $pdo->prepare("
     SELECT 
@@ -72,6 +90,64 @@ $dept_stats_stmt = $pdo->prepare("
 $dept_stats_stmt->execute([$today]);
 $department_stats = $dept_stats_stmt->fetchAll();
 
+// 2.5 สถิติสำหรับ Charts: แนวโน้ม 7 วัน, ชั่วโมงเร่งด่วนวันนี้, สัดส่วนสถานะวันนี้
+$counts_by_date = [];
+foreach ($pdo->query("
+    SELECT DATE(created_at) AS stat_date, COUNT(*) AS total
+    FROM queues
+    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+    GROUP BY DATE(created_at)
+")->fetchAll() as $row) {
+    $counts_by_date[$row['stat_date']] = (int)$row['total'];
+}
+$daily_series = [];
+for ($i = 6; $i >= 0; $i--) {
+    $ds = date('Y-m-d', strtotime("-{$i} days"));
+    $daily_series[$ds] = $counts_by_date[$ds] ?? 0;
+}
+$daily_max = max(max($daily_series), 1);
+$thai_days = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+
+// จำนวนคิวแยกตามชั่วโมงของวันนี้ (07:00–18:00)
+$hourly = array_fill(7, 12, 0);
+foreach ($pdo->query("
+    SELECT HOUR(created_at) AS h, COUNT(*) AS total
+    FROM queues
+    WHERE DATE(created_at) = CURDATE()
+    GROUP BY HOUR(created_at)
+")->fetchAll() as $row) {
+    $h = (int)$row['h'];
+    if ($h >= 7 && $h <= 18) {
+        $hourly[$h] = (int)$row['total'];
+    }
+}
+$hourly_max  = max(max($hourly), 1);
+$peak_hour   = (int)array_search(max($hourly), $hourly);
+
+// สัดส่วนสถานะคิววันนี้ (โดนัท)
+$status_today_stmt = $pdo->prepare("
+    SELECT status, COUNT(*) AS total
+    FROM queues
+    WHERE DATE(created_at) = ?
+    GROUP BY status
+");
+$status_today_stmt->execute([$today]);
+$status_today = [];
+foreach ($status_today_stmt->fetchAll() as $row) {
+    $status_today[$row['status']] = (int)$row['total'];
+}
+$queues_today_total = array_sum($status_today);
+
+$status_order  = ['waiting', 'called', 'serving', 'completed', 'cancelled'];
+$status_colors = [
+    'waiting'   => 'var(--amber-text)',
+    'called'    => 'var(--violet-text)',
+    'serving'   => 'var(--cyan-text)',
+    'completed' => 'var(--green-text)',
+    'cancelled' => 'var(--red-text)',
+];
+$donut_c = 2 * M_PI * 54; // เส้นรอบวงของ SVG donut (r = 54)
+
 // 3. รายการคิวประจำวัน (รองรับ Filter แผนก)
 $query_queues = "
     SELECT 
@@ -87,11 +163,17 @@ $query_queues = "
         p.last_name,
         d.id as department_id,
         d.department_name,
-        d.department_code
+        d.department_code,
+        r.room_number,
+        r.room_name,
+        pq.id as rx_id,
+        pq.pharmacy_queue_number
     FROM queues q
     JOIN visits v ON q.visit_id = v.id
     JOIN patients p ON v.patient_id = p.id
     JOIN departments d ON q.department_id = d.id
+    LEFT JOIN rooms r ON q.room_id = r.id
+    LEFT JOIN pharmacy_queues pq ON pq.visit_id = v.id
     WHERE DATE(q.created_at) = ?
 ";
 $params_queues = [$today];
@@ -109,7 +191,7 @@ require_once __DIR__ . '/includes/header.php';
 ?>
 
 <!-- หัวหน้างาน (Operational Header) -->
-<div class="page-header" style="margin-bottom: 20px;">
+<div class="page-header">
     <div>
         <h1 class="page-title">ศูนย์จัดการและเรียกคิวผู้ป่วย</h1>
         <p class="page-subtitle">เวชปฏิบัติประจำวันที่ <?= thai_datetime(date('Y-m-d H:i:s'), false) ?> (วันนี้)</p>
@@ -158,10 +240,106 @@ require_once __DIR__ . '/includes/header.php';
     <div class="triage-divider"></div>
 
     <div class="triage-cell">
+        <span class="triage-label">คิวรับยา (Pharmacy)</span>
+        <span class="triage-value text-emerald"><?= number_format($today_rx_count) ?></span>
+        <span class="triage-sub">รอรับยา <?= number_format($today_rx_waiting) ?> คิว</span>
+    </div>
+    <div class="triage-divider"></div>
+
+    <div class="triage-cell">
         <span class="triage-label">ผู้ป่วยในระบบ</span>
         <span class="triage-value text-slate"><?= number_format($total_patients) ?></span>
         <span class="triage-sub">เวชระเบียนทั้งหมด</span>
     </div>
+</div>
+
+<!-- แถบสถิติประจำวัน (Operational Statistics) -->
+<div class="stats-grid">
+
+    <!-- คิวสะสม 7 วันย้อนหลัง -->
+    <div class="card" style="margin-bottom: 0;">
+        <div class="card-header">
+            <h2 class="card-title"><i class="fa-solid fa-chart-column"></i> คิวสะสม 7 วันย้อนหลัง</h2>
+        </div>
+        <div class="bar-chart">
+            <?php foreach ($daily_series as $ds => $count): ?>
+                <?php
+                $is_peak_day = $count > 0 && $count === $daily_max;
+                $bar_px = $count > 0 ? max(4, (int)round($count / $daily_max * 106)) : 0;
+                ?>
+                <div class="bar-col" title="<?= thai_datetime($ds, false) ?>: <?= $count ?> คิว">
+                    <span class="bar-value <?= $is_peak_day ? 'is-peak' : '' ?>"><?= $count > 0 ? $count : '' ?></span>
+                    <div class="bar-track">
+                        <?php if ($bar_px > 0): ?>
+                            <div class="bar <?= $is_peak_day ? 'is-peak' : '' ?>" style="height: <?= $bar_px ?>px;" aria-hidden="true"></div>
+                        <?php endif; ?>
+                    </div>
+                    <span class="bar-label"><?= $thai_days[(int)date('w', strtotime($ds))] ?></span>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <!-- ชั่วโมงเร่งด่วนวันนี้ -->
+    <div class="card" style="margin-bottom: 0;">
+        <div class="card-header">
+            <h2 class="card-title"><i class="fa-solid fa-clock"></i> คิวเข้าระบบตามชั่วโมง (วันนี้)</h2>
+        </div>
+        <div class="bar-chart">
+            <?php foreach ($hourly as $h => $total): ?>
+                <?php
+                $is_peak_h = $total > 0 && $h === $peak_hour;
+                $bar_px = $total > 0 ? max(4, (int)round($total / $hourly_max * 106)) : 0;
+                ?>
+                <div class="bar-col" title="<?= str_pad($h, 2, '0', STR_PAD_LEFT) ?>:00 น.: <?= $total ?> คิว">
+                    <span class="bar-value <?= $is_peak_h ? 'is-peak' : '' ?>"><?= $is_peak_h ? $total : '' ?></span>
+                    <div class="bar-track">
+                        <?php if ($bar_px > 0): ?>
+                            <div class="bar <?= $is_peak_h ? 'is-peak' : '' ?>" style="height: <?= $bar_px ?>px;" aria-hidden="true"></div>
+                        <?php endif; ?>
+                    </div>
+                    <span class="bar-label"><?= str_pad($h, 2, '0', STR_PAD_LEFT) ?></span>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <!-- สัดส่วนสถานะคิววันนี้ -->
+    <div class="card" style="margin-bottom: 0;">
+        <div class="card-header">
+            <h2 class="card-title"><i class="fa-solid fa-chart-pie"></i> สัดส่วนสถานะคิววันนี้</h2>
+        </div>
+        <?php if ($queues_today_total === 0): ?>
+            <p style="color: var(--text-muted); font-size: 0.9rem; padding: 12px 0;">
+                ยังไม่มีคิวเข้าระบบวันนี้ — เมื่อออกบัตรคิวใบแรก สัดส่วนจะปรากฏที่นี่
+            </p>
+        <?php else: ?>
+            <div class="donut-wrap">
+                <svg class="donut" viewBox="0 0 140 140" role="img" aria-label="สัดส่วนสถานะคิววันนี้ รวม <?= $queues_today_total ?> คิว">
+                    <circle class="donut-track" cx="70" cy="70" r="54"></circle>
+                    <?php $donut_offset = 0; foreach ($status_order as $st): ?>
+                        <?php if (empty($status_today[$st])) continue; ?>
+                        <?php $seg_len = $status_today[$st] / $queues_today_total * $donut_c; ?>
+                        <circle class="donut-seg" cx="70" cy="70" r="54"
+                                style="stroke: <?= $status_colors[$st] ?>; stroke-dasharray: <?= number_format($seg_len, 2) ?> <?= number_format($donut_c, 2) ?>; stroke-dashoffset: <?= number_format(-$donut_offset, 2) ?>;"></circle>
+                        <?php $donut_offset += $seg_len; ?>
+                    <?php endforeach; ?>
+                    <text x="70" y="65" text-anchor="middle" class="donut-total"><?= number_format($queues_today_total) ?></text>
+                    <text x="70" y="84" text-anchor="middle" class="donut-caption">คิววันนี้</text>
+                </svg>
+                <ul class="donut-legend">
+                    <?php foreach ($status_order as $st): ?>
+                        <?php if (empty($status_today[$st])) continue; ?>
+                        <li>
+                            <?= get_queue_status_badge($st) ?>
+                            <span class="legend-count"><?= number_format($status_today[$st]) ?> คิว (<?= round($status_today[$st] / $queues_today_total * 100) ?>%)</span>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+        <?php endif; ?>
+    </div>
+
 </div>
 
 <!-- พื้นที่ปฏิบัติการ 2 ฝั่ง (Clinical Workstation Grid) -->
@@ -169,19 +347,15 @@ require_once __DIR__ . '/includes/header.php';
     
     <!-- ฝั่งซ้าย (70%): โต๊ะปฏิบัติการคิวสดแบบเรียลไทม์ -->
     <div class="card" style="margin-bottom: 0;">
-        <div class="card-header" style="flex-wrap: wrap; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
+        <div class="card-header">
+            <div class="card-header-title">
                 <h2 class="card-title"><i class="fa-solid fa-clipboard-list"></i> รายการคิวประจำวัน</h2>
                 <span class="badge badge-secondary"><?= count($active_queues) ?> คิว</span>
                 <?php if ($filter_dept > 0): ?>
-                    <a href="index.php" class="btn btn-outline btn-sm" style="font-size: 0.78rem; padding: 2px 8px;">
+                    <a href="index.php" class="btn btn-outline btn-sm" title="ล้างตัวกรองแผนก">
                         <i class="fa-solid fa-xmark"></i> ล้างตัวกรองแผนก
                     </a>
                 <?php endif; ?>
-            </div>
-            
-            <div style="display: flex; gap: 8px; align-items: center;">
-                <span style="font-size: 0.82rem; color: var(--text-muted);"><i class="fa-solid fa-volume-high"></i> กดเรียกคิวมีเสียงพูดภาษาไทย</span>
             </div>
         </div>
 
@@ -200,8 +374,7 @@ require_once __DIR__ . '/includes/header.php';
                 <tbody>
                     <?php if (empty($active_queues)): ?>
                         <tr>
-                            <td colspan="6" style="text-align: center; padding: 40px; color: var(--text-muted);">
-                                <i class="fa-regular fa-folder-open" style="font-size: 2rem; margin-bottom: 8px; display: block; opacity: 0.5;"></i>
+                            <td colspan="6" class="table-empty">
                                 ยังไม่มีรายการคิว<?= $filter_dept ? 'ในแผนกนี้' : '' ?>ประจำวันนี้
                             </td>
                         </tr>
@@ -210,9 +383,9 @@ require_once __DIR__ . '/includes/header.php';
                             <?php 
                             $is_called = $q['status'] === 'called';
                             $is_serving = $q['status'] === 'serving';
-                            $row_bg = $is_called ? 'background-color: #faf5ff;' : ($is_serving ? 'background-color: #f0f9ff;' : '');
+                            $row_class = $is_called ? 'is-called' : ($is_serving ? 'is-serving' : '');
                             ?>
-                            <tr style="<?= $row_bg ?>">
+                            <tr class="<?= $row_class ?>">
                                 <td>
                                     <strong class="queue-chip <?= $is_called ? 'called' : ($is_serving ? 'serving' : '') ?>">
                                         <?= htmlspecialchars($q['queue_number']) ?>
@@ -220,14 +393,26 @@ require_once __DIR__ . '/includes/header.php';
                                 </td>
                                 <td><code><?= htmlspecialchars($q['hn']) ?></code></td>
                                 <td>
-                                    <a href="patient_detail.php?id=<?= $q['patient_id'] ?>" style="font-weight: 600; color: #0f172a;">
+                                    <a href="patient_detail.php?id=<?= $q['patient_id'] ?>" class="patient-link">
                                         <?= htmlspecialchars($q['first_name'] . ' ' . $q['last_name']) ?>
                                     </a>
                                 </td>
                                 <td>
-                                    <span style="color: #475569; font-weight: 500;">
+                                    <span class="dept-line">
                                         [<?= htmlspecialchars($q['department_code']) ?>] <?= htmlspecialchars($q['department_name']) ?>
                                     </span>
+                                    <?php if ($q['room_number']): ?>
+                                        <div class="room-line">
+                                            <i class="fa-solid fa-door-open"></i> <?= htmlspecialchars($q['room_name'] ?: ('ห้อง ' . $q['room_number'])) ?>
+                                        </div>
+                                    <?php endif; ?>
+                                    <?php if ($q['pharmacy_queue_number']): ?>
+                                        <div style="margin-top: 3px;">
+                                            <a href="print_pharmacy.php?id=<?= $q['rx_id'] ?>" target="_blank" class="badge badge-rx" style="text-decoration: none;" title="พิมพ์สลิปรับยา">
+                                                <i class="fa-solid fa-pills"></i> คิวรับยา: <?= htmlspecialchars($q['pharmacy_queue_number']) ?>
+                                            </a>
+                                        </div>
+                                    <?php endif; ?>
                                 </td>
                                 <td>
                                     <?= get_queue_status_badge($q['status']) ?>
@@ -239,21 +424,23 @@ require_once __DIR__ . '/includes/header.php';
                                         
                                         <?php if ($q['status'] === 'waiting'): ?>
                                             <input type="hidden" name="action" value="call">
-                                            <button type="submit" class="btn btn-primary btn-sm" onclick="speakQueue('<?= htmlspecialchars($q['queue_number']) ?>', '<?= htmlspecialchars($q['department_name']) ?>')">
+                                            <button type="submit" class="btn btn-primary btn-sm" onclick="speakQueue('<?= htmlspecialchars($q['queue_number']) ?>', '<?= htmlspecialchars($q['department_name']) ?>', '<?= htmlspecialchars($q['room_name'] ?: ('ห้อง ' . $q['room_number'])) ?>')">
                                                 <i class="fa-solid fa-bullhorn"></i> เรียกคิว
                                             </button>
                                         <?php elseif ($q['status'] === 'called'): ?>
                                             <input type="hidden" name="action" value="serve">
-                                            <button type="submit" class="btn btn-outline btn-sm" style="color: var(--primary); border-color: #bae6fd;">
+                                            <button type="submit" class="btn btn-outline btn-sm">
                                                 <i class="fa-solid fa-play"></i> เข้าตรวจ
                                             </button>
-                                            <button type="button" class="btn btn-secondary btn-sm" onclick="speakQueue('<?= htmlspecialchars($q['queue_number']) ?>', '<?= htmlspecialchars($q['department_name']) ?>')" title="เรียกซ้ำ">
+                                            <button type="button" class="btn btn-secondary btn-sm" onclick="speakQueue('<?= htmlspecialchars($q['queue_number']) ?>', '<?= htmlspecialchars($q['department_name']) ?>', '<?= htmlspecialchars($q['room_name'] ?: ('ห้อง ' . $q['room_number'])) ?>')" title="เรียกซ้ำ">
                                                 <i class="fa-solid fa-volume-high"></i>
                                             </button>
                                         <?php elseif ($q['status'] === 'serving'): ?>
-                                            <input type="hidden" name="action" value="complete">
-                                            <button type="submit" class="btn btn-success btn-sm">
-                                                <i class="fa-solid fa-check"></i> เสร็จสิ้น
+                                            <button type="submit" name="action" value="complete_and_pharmacy" class="btn btn-success btn-sm" title="ตรวจเสร็จและส่งต่อไปรับยา">
+                                                <i class="fa-solid fa-pills"></i> เสร็จและส่งรับยา
+                                            </button>
+                                            <button type="submit" name="action" value="complete" class="btn btn-outline btn-sm" title="ตรวจเสร็จ ไม่รับยา">
+                                                <i class="fa-solid fa-check"></i> ไม่รับยา
                                             </button>
                                         <?php endif; ?>
                                     </form>
@@ -286,19 +473,19 @@ require_once __DIR__ . '/includes/header.php';
                 $has_serving = (int)$dept['serving_count'] > 0;
                 ?>
                 <a href="index.php?dept_id=<?= $dept['id'] ?>" class="dept-status-card <?= $is_selected ? 'selected' : '' ?>">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                    <div class="dept-status-head">
                         <div>
-                            <strong style="color: #0f172a; font-size: 0.95rem;">
+                            <strong class="dept-status-name">
                                 <?= htmlspecialchars($dept['department_name']) ?>
                             </strong>
-                            <div style="font-size: 0.76rem; color: var(--text-muted);">
+                            <div class="dept-status-code">
                                 รหัส: <code><?= htmlspecialchars($dept['department_code']) ?></code>
                             </div>
                         </div>
                         <span class="dept-total-pill"><?= (int)$dept['total_queues'] ?> คิว</span>
                     </div>
 
-                    <div style="display: flex; gap: 8px; font-size: 0.8rem;">
+                    <div class="dept-status-badges">
                         <span class="dept-mini-badge amber">รอ: <?= (int)$dept['waiting_count'] ?></span>
                         <span class="dept-mini-badge cyan">ตรวจ: <?= (int)$dept['serving_count'] ?></span>
                         <span class="dept-mini-badge green">เสร็จ: <?= (int)$dept['completed_count'] ?></span>

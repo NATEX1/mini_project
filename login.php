@@ -1,5 +1,5 @@
 <?php
-// login.php - หน้าเข้าสู่ระบบเจ้าหน้าที่
+// login.php - หน้าเข้าสู่ระบบเจ้าหน้าที่ (Clinical Workstation Authentication)
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/includes/functions.php';
 
@@ -27,8 +27,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['username'] = $staff['username'];
             $_SESSION['staff_name'] = $staff['first_name'] . ' ' . $staff['last_name'];
             $_SESSION['role'] = $staff['role'];
+            $_SESSION['department_id'] = $staff['department_id'] ?? null;
+            $_SESSION['room_id'] = $staff['room_id'] ?? null;
 
-            set_flash('success', 'ยินดีต้อนรับเข้าสู่ระบบ ' . htmlspecialchars($_SESSION['staff_name']));
+            set_flash('success', 'ยินดีต้อนรับเข้าสู่ระบบ ' . $_SESSION['staff_name']);
             header('Location: index.php');
             exit;
         } else {
@@ -45,71 +47,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <title>เข้าสู่ระบบ - ระบบลงทะเบียนและจัดการคิวโรงพยาบาล</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        body {
-            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .login-card {
-            background: #ffffff;
-            width: 100%;
-            max-width: 440px;
-            border-radius: var(--radius-lg);
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
-            padding: 40px 32px;
-            border: 1px solid var(--border);
-        }
-        .login-header {
-            text-align: center;
-            margin-bottom: 28px;
-        }
-        .login-icon {
-            width: 64px;
-            height: 64px;
-            background: linear-gradient(135deg, #0284c7, #06b6d4);
-            color: #fff;
-            border-radius: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 2rem;
-            margin: 0 auto 16px;
-            box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4);
-        }
-        .login-title {
-            font-size: 1.45rem;
-            font-weight: 700;
-            color: #0f172a;
-        }
-        .login-desc {
-            font-size: 0.88rem;
-            color: #64748b;
-            margin-top: 4px;
-        }
-        .demo-box {
-            background: #f8fafc;
-            border: 1px dashed #cbd5e1;
-            border-radius: var(--radius-md);
-            padding: 12px 14px;
-            margin-top: 24px;
-            font-size: 0.82rem;
-            color: #475569;
-        }
-    </style>
 </head>
-<body>
+<body class="login-page-body">
 
-<div class="login-card">
-    <div class="login-header">
-        <div class="login-icon">
+<div class="login-card-authoritative">
+    <div class="login-brand-header">
+        <div class="login-brand-cross">
             <i class="fa-solid fa-hospital"></i>
         </div>
-        <h1 class="login-title">ระบบลงทะเบียนและจัดการคิว</h1>
-        <p class="login-desc">Hospital Patient Registration & Queue System</p>
+        <h1 class="login-brand-title">ระบบลงทะเบียนและจัดการคิว</h1>
+        <p class="login-brand-sub">โรงพยาบาลทั่วไป • Patient Registration & Clinical Queue</p>
     </div>
 
     <?php if ($error): ?>
@@ -121,28 +68,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     <?php endif; ?>
 
-    <form method="POST" action="login.php">
+    <form method="POST" action="login.php" id="loginForm">
         <div class="form-group">
-            <label for="username"><i class="fa-regular fa-user"></i> ชื่อผู้ใช้ (Username)</label>
+            <label for="username">ชื่อผู้ใช้ (Username)</label>
             <input type="text" id="username" name="username" placeholder="กรอกชื่อผู้ใช้..." required autofocus value="<?= htmlspecialchars($_POST['username'] ?? '') ?>">
         </div>
 
         <div class="form-group">
-            <label for="password"><i class="fa-solid fa-lock"></i> รหัสผ่าน (Password)</label>
+            <label for="password">รหัสผ่าน (Password)</label>
             <input type="password" id="password" name="password" placeholder="กรอกรหัสผ่าน..." required>
         </div>
 
-        <button type="submit" class="btn btn-primary btn-lg" style="width: 100%; margin-top: 10px;">
+        <button type="submit" class="btn btn-primary btn-lg" style="width: 100%; margin-top: 6px;">
             <i class="fa-solid fa-right-to-bracket"></i> เข้าสู่ระบบ
         </button>
     </form>
 
-    <div class="demo-box">
-        <strong><i class="fa-solid fa-key"></i> บัญชีทดสอบเริ่มต้น (ตามฐานข้อมูล):</strong><br>
-        • ผู้ดูแลระบบ: user: <code>admin</code> / pass: <code>admin123</code><br>
-        • เจ้าหน้าที่ลงทะเบียน: user: <code>staff1</code> / pass: <code>staff123</code>
+    <div class="login-roster-box">
+        <div class="login-roster-header">
+            <span><i class="fa-solid fa-id-card-clip"></i> บัญชีทดสอบระบบตามฐานข้อมูล</span>
+            <span style="color: var(--slate-400); font-weight: normal;">คลิกเพื่อกรอกอัตโนมัติ</span>
+        </div>
+        <table class="login-roster-table">
+            <tbody>
+                <tr>
+                    <td class="login-roster-role">ผู้ดูแลระบบ</td>
+                    <td class="login-roster-user">admin / admin123</td>
+                    <td style="text-align: right;">
+                        <button type="button" class="btn-quick-fill" onclick="fillLogin('admin', 'admin123')">กรอก</button>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="login-roster-role">แพทย์ (อายุรกรรม ห้อง 101)</td>
+                    <td class="login-roster-user">doctor1 / admin123</td>
+                    <td style="text-align: right;">
+                        <button type="button" class="btn-quick-fill" onclick="fillLogin('doctor1', 'admin123')">กรอก</button>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="login-roster-role">แพทย์ (กุมารเวชกรรม ห้อง 201)</td>
+                    <td class="login-roster-user">doctor2 / admin123</td>
+                    <td style="text-align: right;">
+                        <button type="button" class="btn-quick-fill" onclick="fillLogin('doctor2', 'admin123')">กรอก</button>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="login-roster-role">เจ้าหน้าที่ลงทะเบียน</td>
+                    <td class="login-roster-user">staff1 / staff123</td>
+                    <td style="text-align: right;">
+                        <button type="button" class="btn-quick-fill" onclick="fillLogin('staff1', 'staff123')">กรอก</button>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
     </div>
 </div>
+
+<script>
+function fillLogin(u, p) {
+    document.getElementById('username').value = u;
+    document.getElementById('password').value = p;
+    document.getElementById('password').focus();
+}
+</script>
 
 </body>
 </html>

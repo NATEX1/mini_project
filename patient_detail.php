@@ -38,6 +38,8 @@ $visits_stmt = $pdo->prepare("
         v.status as visit_status,
         d.department_name,
         d.department_code,
+        r.room_number,
+        r.room_name,
         s.first_name as staff_fname,
         s.last_name as staff_lname,
         q.id as queue_id,
@@ -45,11 +47,16 @@ $visits_stmt = $pdo->prepare("
         q.queue_sequence,
         q.status as queue_status,
         q.called_at,
-        q.completed_at
+        q.completed_at,
+        pq.id as rx_id,
+        pq.pharmacy_queue_number,
+        pq.status as rx_status
     FROM visits v
     JOIN departments d ON v.department_id = d.id
+    LEFT JOIN rooms r ON v.room_id = r.id
     LEFT JOIN staff s ON v.staff_id = s.id
     LEFT JOIN queues q ON q.visit_id = v.id
+    LEFT JOIN pharmacy_queues pq ON pq.visit_id = v.id
     WHERE v.patient_id = ?
     ORDER BY v.id DESC
 ");
@@ -64,7 +71,7 @@ require_once __DIR__ . '/includes/header.php';
         <h1 class="page-title"><i class="fa-solid fa-address-card"></i> เวชระเบียนผู้ป่วย</h1>
         <p class="page-subtitle">HN: <strong><?= htmlspecialchars($patient['hn']) ?></strong> - <?= htmlspecialchars($patient['first_name'] . ' ' . $patient['last_name']) ?></p>
     </div>
-    <div style="display: flex; gap: 10px;">
+    <div class="page-actions">
         <a href="patients.php" class="btn btn-outline">
             <i class="fa-solid fa-arrow-left"></i> กลับหน้ารายชื่อ
         </a>
@@ -77,27 +84,27 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div style="display: grid; grid-template-columns: 1fr 2fr; gap: 24px; margin-bottom: 24px;">
-    
+<div class="record-layout">
+
     <!-- กล่องข้อมูลส่วนตัวผู้ป่วย -->
-    <div class="card" style="margin-bottom: 0;">
+    <div class="card card-flush">
         <div class="card-header">
             <h2 class="card-title"><i class="fa-solid fa-id-card"></i> ข้อมูลทั่วไป</h2>
         </div>
 
-        <div style="text-align: center; margin-bottom: 18px;">
-            <div style="width: 80px; height: 80px; background: var(--primary-light); color: var(--primary); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; margin: 0 auto 10px;">
+        <div class="patient-id-block">
+            <div class="patient-avatar">
                 <i class="fa-solid fa-user"></i>
             </div>
-            <h3 style="font-size: 1.25rem; font-weight: 700; color: #0f172a;">
+            <h3 class="patient-fullname">
                 <?= htmlspecialchars($patient['first_name'] . ' ' . $patient['last_name']) ?>
             </h3>
-            <span style="display: inline-block; background: #e0f2fe; color: #0369a1; padding: 3px 12px; border-radius: 999px; font-weight: 600; font-size: 0.88rem; margin-top: 4px;">
+            <span class="hn-pill">
                 <?= htmlspecialchars($patient['hn']) ?>
             </span>
         </div>
 
-        <ul style="list-style: none; font-size: 0.92rem; line-height: 2;">
+        <ul class="patient-facts">
             <li><strong>เลขบัตร ปชช.:</strong> <code><?= htmlspecialchars($patient['national_id']) ?></code></li>
             <li><strong>เพศ:</strong> <?= htmlspecialchars($patient['gender'] ?: '-') ?></li>
             <li><strong>วันเกิด:</strong> <?= $patient['date_of_birth'] ? thai_datetime($patient['date_of_birth'], false) : '-' ?> (อายุ <?= $age ?>)</li>
@@ -108,7 +115,7 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 
     <!-- ประวัติการมาโรงพยาบาลและคิวการตรวจ -->
-    <div class="card" style="margin-bottom: 0;">
+    <div class="card card-flush">
         <div class="card-header">
             <h2 class="card-title">
                 <i class="fa-solid fa-clock-rotate-left"></i> ประวัติการเข้ารับบริการ (Visits & Queues)
@@ -123,9 +130,10 @@ require_once __DIR__ . '/includes/header.php';
                 <thead>
                     <tr>
                         <th>วันที่ / เวลา</th>
-                        <th>แผนก / คลินิก</th>
-                        <th>หมายเลขคิว</th>
-                        <th>สถานะคิว</th>
+                        <th>แผนก / ห้องตรวจ</th>
+                        <th>คิวตรวจ</th>
+                        <th>สถานะตรวจ</th>
+                        <th>คิวรับยา (Pharmacy)</th>
                         <th>เจ้าหน้าที่</th>
                         <th style="text-align: right;">เอกสาร</th>
                     </tr>
@@ -133,7 +141,7 @@ require_once __DIR__ . '/includes/header.php';
                 <tbody>
                     <?php if (empty($visits)): ?>
                         <tr>
-                            <td colspan="6" style="text-align: center; padding: 25px; color: var(--text-muted);">
+                            <td colspan="7" class="table-empty">
                                 ยังไม่มีประวัติการมาตรวจของท่านนี้
                             </td>
                         </tr>
@@ -142,15 +150,22 @@ require_once __DIR__ . '/includes/header.php';
                         <tr>
                             <td><?= thai_datetime($v['visit_date']) ?></td>
                             <td>
-                                <strong>[<?= htmlspecialchars($v['department_code']) ?>]</strong>
-                                <?= htmlspecialchars($v['department_name']) ?>
+                                <div>
+                                    <strong>[<?= htmlspecialchars($v['department_code']) ?>]</strong>
+                                    <?= htmlspecialchars($v['department_name']) ?>
+                                </div>
+                                <?php if ($v['room_number']): ?>
+                                    <div class="room-line">
+                                        <i class="fa-solid fa-door-open"></i> <?= htmlspecialchars($v['room_name'] ?: ('ห้อง ' . $v['room_number'])) ?>
+                                    </div>
+                                <?php endif; ?>
                             </td>
                             <td>
                                 <?php if ($v['queue_number']): ?>
-                                    <strong style="font-size: 1.1rem; color: var(--primary);">
+                                    <strong class="queue-number-strong">
                                         <?= htmlspecialchars($v['queue_number']) ?>
                                     </strong>
-                                    <small style="color: var(--text-muted);">(ลำดับที่ <?= $v['queue_sequence'] ?>)</small>
+                                    <small class="muted-sm">(ลำดับที่ <?= $v['queue_sequence'] ?>)</small>
                                 <?php else: ?>
                                     -
                                 <?php endif; ?>
@@ -159,12 +174,26 @@ require_once __DIR__ . '/includes/header.php';
                                 <?= $v['queue_status'] ? get_queue_status_badge($v['queue_status']) : '-' ?>
                             </td>
                             <td>
+                                <?php if ($v['pharmacy_queue_number']): ?>
+                                    <a href="print_pharmacy.php?id=<?= $v['rx_id'] ?>" target="_blank" class="badge badge-rx" style="text-decoration: none;" title="พิมพ์สลิปรับยา">
+                                        <i class="fa-solid fa-pills"></i> <?= htmlspecialchars($v['pharmacy_queue_number']) ?>
+                                    </a>
+                                <?php else: ?>
+                                    <span class="muted-sm">-</span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
                                 <?= htmlspecialchars($v['staff_fname'] ? ($v['staff_fname'] . ' ' . $v['staff_lname']) : '-') ?>
                             </td>
-                            <td style="text-align: right;">
+                            <td style="text-align: right; white-space: nowrap;">
                                 <?php if ($v['queue_id']): ?>
-                                    <a href="print_queue.php?queue_id=<?= $v['queue_id'] ?>" target="_blank" class="btn btn-outline btn-sm" title="พิมพ์บัตรคิว">
-                                        <i class="fa-solid fa-print"></i> บัตรคิว
+                                    <a href="print_queue.php?queue_id=<?= $v['queue_id'] ?>" target="_blank" class="btn btn-outline btn-sm" title="พิมพ์บัตรคิวตรวจ">
+                                        <i class="fa-solid fa-print"></i> ตรวจ
+                                    </a>
+                                <?php endif; ?>
+                                <?php if ($v['pharmacy_queue_number']): ?>
+                                    <a href="print_pharmacy.php?id=<?= $v['rx_id'] ?>" target="_blank" class="btn btn-rx-outline btn-sm" style="margin-left: 4px;" title="พิมพ์บัตรคิวรับยา">
+                                        <i class="fa-solid fa-pills"></i> ยา
                                     </a>
                                 <?php endif; ?>
                             </td>

@@ -4,15 +4,8 @@
  */
 
 // ระบบสังเคราะห์เสียงเรียกคิวภาษาไทย (Web Speech API)
-function speakQueue(queueNumber, departmentName) {
-    if (!('speechSynthesis' in window)) {
-        console.warn('เบราว์เซอร์นี้ไม่รองรับการสังเคราะห์เสียง (Web Speech API)');
-        return;
-    }
-
-    // แปลงรหัสคิวให้ออกเสียงชัดเจน เช่น 'MED-001' -> 'เอ็ม อี ดี ศูนย์ ศูนย์ หนึ่ง'
+function convertQueueNumberToThaiSpeech(queueNumber) {
     let spokenNumber = queueNumber.replace(/-/g, ' ');
-    // แทนที่ตัวเลข 0-9 เป็นคำภาษาไทย
     const digitsThai = {
         '0': ' ศูนย์ ',
         '1': ' หนึ่ง ',
@@ -26,36 +19,99 @@ function speakQueue(queueNumber, departmentName) {
         '9': ' เก้า '
     };
     
-    // แปลงตัวเลขทีละหลัก
-    let convertedNumber = '';
+    let converted = '';
     for (let char of spokenNumber) {
         if (digitsThai[char] !== undefined) {
-            convertedNumber += digitsThai[char];
+            converted += digitsThai[char];
         } else {
-            convertedNumber += char;
+            converted += char;
         }
     }
+    return converted;
+}
 
-    const textToSpeak = `ขอเชิญหมายเลข ${convertedNumber} ที่${departmentName} ค่ะ`;
-
-    window.speechSynthesis.cancel(); // หยุดเสียงเก่าก่อน
+function speakTextThai(textToSpeak) {
+    if (!('speechSynthesis' in window)) {
+        console.warn('เบราว์เซอร์นี้ไม่รองรับการสังเคราะห์เสียง (Web Speech API)');
+        return;
+    }
+    window.speechSynthesis.cancel(); // หยุดเสียงเดิม
     const utterance = new SpeechSynthesisUtterance(textToSpeak);
     utterance.lang = 'th-TH';
-    utterance.rate = 0.9; // ความเร็วพอดีๆ ชัดเจน
+    utterance.rate = 0.9;
     utterance.pitch = 1.0;
 
-    // ค้นหาเสียงภาษาไทยถ้ามี
     const voices = window.speechSynthesis.getVoices();
     const thaiVoice = voices.find(v => v.lang.includes('th') || v.lang.includes('TH'));
     if (thaiVoice) {
         utterance.voice = thaiVoice;
     }
-
     window.speechSynthesis.speak(utterance);
+}
+
+function speakQueue(queueNumber, departmentName, roomName = '') {
+    const convertedNumber = convertQueueNumberToThaiSpeech(queueNumber);
+    const destination = roomName ? `${departmentName} ${roomName}` : departmentName;
+    const textToSpeak = `ขอเชิญหมายเลข ${convertedNumber} ที่${destination} ค่ะ`;
+    speakTextThai(textToSpeak);
+}
+
+function speakPharmacyQueue(rxNumber, counterName = 'ช่องจ่ายยา 1') {
+    const convertedNumber = convertQueueNumberToThaiSpeech(rxNumber);
+    const textToSpeak = `ขอเชิญคิวรับยาหมายเลข ${convertedNumber} ที่${counterName} ค่ะ`;
+    speakTextThai(textToSpeak);
+}
+
+/* ========================================================
+   จอ TV (PIDS): นาฬิกา / สวิตช์เสียง / เต็มจอ
+   ใช้ร่วมกันทั้งจอคิวตรวจแพทย์และจอห้องจ่ายยา
+   ======================================================== */
+let isSoundEnabled = true;
+
+function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => console.log(err));
+    } else if (document.exitFullscreen) {
+        document.exitFullscreen();
+    }
+}
+
+function initPidsControls() {
+    // นาฬิกาเรียลไทม์
+    const clock = document.getElementById('digital-clock');
+    if (clock) {
+        const tick = () => {
+            const now = new Date();
+            clock.textContent = [now.getHours(), now.getMinutes(), now.getSeconds()]
+                .map(n => String(n).padStart(2, '0'))
+                .join(':');
+        };
+        tick();
+        setInterval(tick, 1000);
+    }
+
+    // สวิตช์เปิด/ปิดเสียงขาน
+    const soundBtn = document.getElementById('toggle-sound-btn');
+    const soundStatus = document.getElementById('sound-status');
+    if (soundBtn && soundStatus) {
+        const soundIcon = soundBtn.querySelector('i');
+        soundBtn.addEventListener('click', () => {
+            isSoundEnabled = !isSoundEnabled;
+            soundStatus.textContent = isSoundEnabled ? 'เปิด' : 'ปิด';
+            soundBtn.classList.toggle('is-muted', !isSoundEnabled);
+            soundBtn.setAttribute('aria-pressed', String(isSoundEnabled));
+            if (soundIcon) {
+                soundIcon.className = isSoundEnabled ? 'fa-solid fa-volume-high' : 'fa-solid fa-volume-xmark';
+            }
+        });
+    }
 }
 
 // DOM Events
 document.addEventListener('DOMContentLoaded', () => {
+    // 0. ควบคุมจอ TV ถ้าหน้านี้เป็นจอแสดงผล
+    initPidsControls();
+
     // 1. ซ่อน Alert อัตโนมัติหลังจาก 4 วินาที
     const alerts = document.querySelectorAll('.alert');
     alerts.forEach(alert => {

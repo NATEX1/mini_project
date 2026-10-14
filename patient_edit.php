@@ -101,7 +101,7 @@ require_once __DIR__ . '/includes/header.php';
     <div class="alert alert-danger">
         <div>
             <i class="fa-solid fa-circle-exclamation"></i>
-            <ul style="margin-left: 20px; margin-top: 5px;">
+            <ul class="error-list">
                 <?php foreach ($errors as $err): ?>
                     <li><?= htmlspecialchars($err) ?></li>
                 <?php endforeach; ?>
@@ -110,7 +110,7 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 <?php endif; ?>
 
-<div class="card" style="max-width: 900px; margin: 0 auto;">
+<div class="card card-narrow-wide">
     <form method="POST" action="patient_edit.php?id=<?= $id ?>">
         
         <div class="form-row">
@@ -164,7 +164,7 @@ require_once __DIR__ . '/includes/header.php';
             <textarea id="address" name="address" rows="3"><?= htmlspecialchars($_POST['address'] ?? $patient['address']) ?></textarea>
         </div>
 
-        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
+        <div class="form-actions-end form-actions-spaced">
             <a href="patient_detail.php?id=<?= $id ?>" class="btn btn-outline">ยกเลิก</a>
             <button type="submit" class="btn btn-primary btn-lg">
                 <i class="fa-solid fa-floppy-disk"></i> บันทึกการเปลี่ยนแปลง

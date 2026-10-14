@@ -17,11 +17,25 @@ function sanitize($data) {
 
 /**
  * บันทึก Flash message เพื่อแสดงผลหลังจาก redirect
+ * $action (optional): ['url' => 'print_pharmacy.php?id=3', 'label' => 'พิมพ์บัตรคิวรับยา', 'blank' => true]
+ * ข้อความล้วนเท่านั้น (render จะ escape ให้) ปุ่ม action วาดจากข้อมูล ไม่ใช่ HTML
  */
-function set_flash($type, $message) {
+function set_flash($type, $message, $action = null) {
+    $link = null;
+    if (is_array($action) && !empty($action['url']) && !empty($action['label'])) {
+        // รับเฉพาะลิงก์ภายใน (กัน javascript: / scheme แปลกๆ)
+        if (preg_match('/^[A-Za-z0-9_\-\.\/\?\=\&\%]+$/', $action['url'])) {
+            $link = [
+                'url'   => $action['url'],
+                'label' => $action['label'],
+                'blank' => !empty($action['blank']),
+            ];
+        }
+    }
     $_SESSION['flash'] = [
         'type' => $type, // 'success', 'danger', 'warning', 'info'
-        'message' => $message
+        'message' => $message,
+        'action' => $link
     ];
 }
 
@@ -53,6 +67,8 @@ function current_user() {
         'username' => $_SESSION['username'] ?? null,
         'name' => $_SESSION['staff_name'] ?? null,
         'role' => $_SESSION['role'] ?? null,
+        'department_id' => $_SESSION['department_id'] ?? null,
+        'room_id' => $_SESSION['room_id'] ?? null,
     ];
 }
 
@@ -133,20 +149,62 @@ function generate_queue_number($pdo, $department_id) {
 }
 
 /**
- * แสดง Badge สถานะคิว
+ * สร้างหมายเลขคิวรับยาประจำวัน (Pharmacy Queue) เช่น RX-001
+ * คืนค่า array ['pharmacy_queue_number' => 'RX-001', 'sequence' => 1]
+ */
+function generate_pharmacy_queue_number($pdo) {
+    $today = date('Y-m-d');
+    $count_stmt = $pdo->prepare("
+        SELECT COUNT(*) 
+        FROM pharmacy_queues 
+        WHERE DATE(created_at) = ?
+    ");
+    $count_stmt->execute([$today]);
+    $sequence = (int)$count_stmt->fetchColumn() + 1;
+
+    $queue_number = 'RX-' . str_pad($sequence, 3, '0', STR_PAD_LEFT);
+
+    return [
+        'pharmacy_queue_number' => $queue_number,
+        'sequence' => $sequence
+    ];
+}
+
+/**
+ * แสดง Badge สถานะคิวตรวจ
  */
 function get_queue_status_badge($status) {
     switch ($status) {
         case 'waiting':
-            return '<span class="badge badge-waiting"><i class="icon-clock"></i> รอรับบริการ</span>';
+            return '<span class="badge badge-waiting"><i class="fa-regular fa-clock"></i> รอรับบริการ</span>';
         case 'called':
-            return '<span class="badge badge-called"><i class="icon-volume"></i> เรียกคิวแล้ว</span>';
+            return '<span class="badge badge-called"><i class="fa-solid fa-volume-high"></i> เรียกคิวแล้ว</span>';
         case 'serving':
-            return '<span class="badge badge-serving"><i class="icon-play"></i> กำลังรับบริการ</span>';
+            return '<span class="badge badge-serving"><i class="fa-solid fa-stethoscope"></i> กำลังตรวจ</span>';
         case 'completed':
-            return '<span class="badge badge-completed"><i class="icon-check"></i> เสร็จสิ้น</span>';
+            return '<span class="badge badge-completed"><i class="fa-solid fa-check"></i> ตรวจเสร็จสิ้น</span>';
         case 'cancelled':
-            return '<span class="badge badge-cancelled"><i class="icon-x"></i> ยกเลิก</span>';
+            return '<span class="badge badge-cancelled"><i class="fa-solid fa-xmark"></i> ยกเลิก</span>';
+        default:
+            return '<span class="badge badge-secondary">' . htmlspecialchars($status) . '</span>';
+    }
+}
+
+/**
+ * แสดง Badge สถานะคิวรับยา
+ */
+function get_pharmacy_status_badge($status) {
+    switch ($status) {
+        case 'waiting':
+            return '<span class="badge badge-waiting"><i class="fa-regular fa-clock"></i> รอจัดยา</span>';
+        case 'preparing':
+            return '<span class="badge badge-serving"><i class="fa-solid fa-flask"></i> กำลังจัดยา</span>';
+        case 'called':
+            return '<span class="badge badge-called"><i class="fa-solid fa-volume-high"></i> เรียกรับยา</span>';
+        case 'completed':
+            return '<span class="badge badge-completed"><i class="fa-solid fa-check-double"></i> จ่ายยาเสร็จสิ้น</span>';
+        case 'cancelled':
+            return '<span class="badge badge-cancelled"><i class="fa-solid fa-xmark"></i> ยกเลิก</span>';
         default:
             return '<span class="badge badge-secondary">' . htmlspecialchars($status) . '</span>';
     }
